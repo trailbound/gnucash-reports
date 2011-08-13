@@ -1,0 +1,33 @@
+Budget Design Documentation
+
+
+The budget will first build 2 lists of records, one for income and one for
+expenses accounts.  If a list of accounts is given in the options, then
+we will use one set of functions to parse through the list of accounts
+and build each of the 2 account lists.  If no list of accounts is given in
+the options, then we will start with the root account and parse down through
+the hierarchy of accounts with another set of functions.
+
+Placeholder accounts that have a budget value assigned to them indicate a
+stop point where we want all the children to be rolled up under that account.
+For such accounts, we stop processing children.
+
+Placeholders without budget values will be shown with their total actual value
+and a sum of their children's budget values. They will not be included in the
+grand totals for income or expense.  They will be displayed in a greyed out
+font in the report so they can be seen but visually indicated to not be
+included in the sum totals.
+
+
+
+
+Personal Reminders
+--------------------------------------------------------------------------------
+Get the root account
+Search for income and expense accounts by sifting through children.
+For top income and expense accounts
+
+List of accounts.
+List of dates for YTD.
+
+List (budget, actual, diff) for all accounts, all periods in account.
