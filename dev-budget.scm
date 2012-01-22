@@ -5,10 +5,229 @@
 (use-modules (ice-9 slib))
 (use-modules (gnucash gnc-module))
 
+
 (gnc:module-load "gnucash/report/report-system" 0)
 (gnc:module-load "gnucash/gnome-utils" 0) ;;for gnc-build-url
+(gnc:module-load "gnucash/html" 0)
+
+(use-modules (ice-9 regex))  ; for regular expressions
+(use-modules (srfi srfi-13)) ; for extra string functions
+
 ;;(gnc:module-load "gnucash/report/user-reports/budget-utils" 0)
 (use-modules (gnucash report user-reports budget-utils))
+
+
+(define (escape-html s1)
+  ;; convert string s1 to escape HTML special characters < > and &
+  ;; i.e. convert them to &lt; &gt; and &amp; respectively.
+  ;; Maybe there's a way to do this in one go... (but order is important)
+  (set! s1 (regexp-substitute/global #f "&" s1 'pre "&amp;" 'post))
+  (set! s1 (regexp-substitute/global #f "<" s1 'pre "&lt;" 'post))
+  (regexp-substitute/global #f ">" s1 'pre "&gt;" 'post))
+
+(define (dump x) (escape-html (object->string x)))
+
+(define (account-link account)
+  ;; Return an HTML link to the given account,
+  ;; e.g. <a href="gnc-register:acct-guid=abcdeaalsdfjkalsdk#">Account Name</a>
+;;  (if opt-use-links?
+      (string-append
+       "<a href=\"gnc-register:acct-guid="
+       (gncAccountGetGUID account)
+       "\">"
+       (xaccAccountGetName account)
+       "</a>") )
+;;      (xaccAccountGetName account)))
+
+(define (display-value-list cc-list comm)
+  (cond
+   ( (null? cc-list) '() )
+   (else (let ( (cc (car cc-list)) )
+           (cons (gnc:gnc-monetary-amount (cc 'getmonetary comm #f)) (display-value-list (cdr cc-list) comm)))
+         )))
+
+
+
+
+(define (budget-record-list-printer record-list port)
+  (cond
+   ((null? record-list) '())
+   (else (let ( (rec (car record-list)) )
+           (budget-record-printer rec port)
+           (budget-record-list-printer (budget-record-children rec) port)
+           (budget-record-list-printer (cdr record-list) port) ))))
+
+;; Budget record
+(define (budget-record-printer budget-record port)
+    ;; budget-record printer.  This is for debugging reports, so it uses
+    ;; HTML for pretty-printing
+    (set-current-output-port port)
+    (display "<br>budget-record:-  ")
+    (display " account: ")     (display (dump (xaccAccountGetName (budget-record-account budget-record))))
+;;    (display " actual-cc-list: ")     (display (display-value-list (budget-record-actual-cc budget-record) (budget-record-commodity budget-record)))
+    (display " budget-cc-list: ")     (display (display-value-list (budget-record-budget-cc budget-record) (budget-record-commodity budget-record)))
+
+;;    (display " code: ")        (display (budget-record-code budget-record))
+;;    (display " placeholder: ") (display (dump (budget-record-placeholder? budget-record)))
+;;    (display " namelink: ")    (display (budget-record-namelink budget-record))
+;;    (display " commodity: ")   (if (budget-record-commodity budget-record)
+;;                                   (display (gnc-commodity-get-mnemonic (budget-record-commodity budget-record)))
+;;                                   (display "#f"))
+;;    (display " balance-num: ") (if (budget-record-balance-num budget-record)
+;;                                   (display (gnc-numeric-to-double (budget-record-balance-num budget-record)))
+;;                                        ;(display (gnc:monetary->string (budget-record-balance-mny budget-record)))
+;;                                        ;(display (format-monetary (budget-record-balance-num budget-record))) ; not this -- too fancy
+;;                                   (display "#f"))
+;;    (display " depth: ")       (display (budget-record-depth budget-record))
+;;    (display " treedepth: ")   (display (budget-record-treedepth budget-record))
+;;    (display " non-zero?: ")   (display (budget-record-non-zero? budget-record))
+;;    (display " summary?: ")    (display (budget-record-summary? budget-record))
+;;    (display " subtotal-cc: ") (if (budget-record-subtotal-cc budget-record)
+;;                                        ;(display (get-comm-coll-total (budget-record-subtotal-cc budget-record) #f))
+;;                                        ;(display (format-comm-coll (budget-record-subtotal-cc budget-record)))
+;;                                   (display
+;;                                    (string-concatenate
+;;                                     (map-in-order
+;;                                      (lambda (mny)
+;;                                        (string-append (gnc:monetary->string mny) " "))
+;;                                      ((budget-record-subtotal-cc budget-record) 'format gnc:make-gnc-monetary #f))))
+;;                                   (display "#f"))
+;;    (display " sublist: ")     (if (budget-record-sublist budget-record)
+;;                                   (begin
+;;                                     (display "\n<ul>")
+;;                                     (for sub-budget-record in (budget-record-sublist budget-record) do
+;;                                          (display "\n<li>")
+;;                                          (budget-record-printer sub-budget-record port)
+;;                                          (display "</li>"))
+;;                                     (display "</ul>"))
+;;                                   (display "#f"))
+    )
+
+(define <budget-record> (make-record-type "<budget-record>"
+                                          '(account
+                                            code
+                                            placeholder?
+                                            namelink ; a/c name, as link if required
+                                            commodity
+                                            actual-cc
+                                            budget-cc
+                                            diff-cc
+                                            actual-total-cc
+                                            budget-total-cc
+                                            diff-total-cc
+                                            children
+                                            balance-num ; excluding sublist
+                                            depth
+                                            treedepth
+                                            non-zero?  ; #t if this or any sub-a/cs are non zero
+                                            summary?   ; #t if subaccounts summarised here
+                                            subtotal-cc ; of sublist plus this a/c
+                                            sublist)
+                                          budget-record-printer))
+(define (blank-budget-record)
+  ((record-constructor <budget-record>)
+   #f         ; account
+   ""         ; code
+   #f         ; placeholder?
+   ""         ; namelink
+   (gnc-default-currency)         ; commodity
+   (gnc:make-commodity-collector)
+   (gnc:make-commodity-collector)
+   (gnc:make-commodity-collector)
+   (gnc:make-commodity-collector)
+   (gnc:make-commodity-collector)
+   (gnc:make-commodity-collector)
+   '()
+   (gnc-numeric-zero) ; balance-num
+   0         ; depth
+   0         ; treedepth
+   #f         ; non-zero?
+   #f        ; summary?
+   (gnc:make-commodity-collector) ; subtotal-cc
+   #f        ;'()        ; sublist
+   ))
+
+;;  (define newbudgetrec-full (record-constructor budgetrectype))                ; requires all the fields
+;;  (define newbudgetrec-empty (record-constructor budgetrectype '()))        ; all fields default to #f
+;;  (define newbudgetrec (record-constructor budgetrectype '(account         ; most-likely-to-be-needed fields
+;;                                                           code
+;;                                                           placeholder?
+;;                                                           namelink
+;;                                                           commodity
+;;                                                           balance-num
+;;                                                           depth
+;;                                                           treedepth)))
+;;
+;;  (define (newbudgetrec-clean)
+;;    ;; Create a new accrec with 'clean' empty values, e.g. strings are "", not #f
+;;    (newbudgetrec-full #f         ; account
+;;                       ""         ; code
+;;                       #f         ; placeholder?
+;;                       ""         ; namelink
+;;                       (gnc-default-currency)         ; commodity
+;;                       (gnc-numeric-zero) ; balance-num
+;;                       0         ; depth
+;;                       0         ; treedepth
+;;                       #f         ; non-zero?
+;;                       #f        ; summary?
+;;                       (gnc:make-commodity-collector) ; subtotal-cc
+;;                       #f        ;'()        ; sublist
+;;                       ))
+
+(define budget-record?                  (record-predicate <budget-record>))
+(define budget-record-account           (record-accessor <budget-record> 'account))
+(define budget-record-set-account!      (record-modifier <budget-record> 'account))
+(define budget-record-code              (record-accessor <budget-record> 'code))
+(define budget-record-set-code!         (record-modifier <budget-record> 'code))
+(define budget-record-placeholder?      (record-accessor <budget-record> 'placeholder?))
+(define budget-record-set-placeholder?! (record-modifier <budget-record> 'placeholder?))
+(define budget-record-namelink          (record-accessor <budget-record> 'namelink))
+(define budget-record-set-namelink!     (record-modifier <budget-record> 'namelink))
+(define budget-record-commodity         (record-accessor <budget-record> 'commodity))
+(define budget-record-set-commodity!    (record-modifier <budget-record> 'commodity))
+(define budget-record-actual-cc         (record-accessor <budget-record> 'actual-cc))
+(define budget-record-set-actual-cc!    (record-modifier <budget-record> 'actual-cc))
+(define budget-record-budget-cc         (record-accessor <budget-record> 'budget-cc))
+(define budget-record-set-budget-cc!    (record-modifier <budget-record> 'budget-cc))
+(define budget-record-diff-cc           (record-accessor <budget-record> 'diff-cc))
+(define budget-record-set-diff-cc!      (record-modifier <budget-record> 'diff-cc))
+
+(define budget-record-actual-total-cc       (record-accessor <budget-record> 'actual-total-cc))
+(define budget-record-set-actual-total-cc!  (record-modifier <budget-record> 'actual-total-cc))
+(define budget-record-budget-total-cc       (record-accessor <budget-record> 'budget-total-cc))
+(define budget-record-set-budget-total-cc!  (record-modifier <budget-record> 'budget-total-cc))
+(define budget-record-diff-total-cc         (record-accessor <budget-record> 'diff-total-cc))
+(define budget-record-set-diff-total-cc!    (record-modifier <budget-record> 'diff-total-cc))
+
+(define budget-record-children          (record-accessor <budget-record> 'children))
+(define budget-record-set-children!     (record-modifier <budget-record> 'children))
+
+
+;; Sorts children account lists and passes INCOME or EXPENSE type accounts to their
+;; respective build-*-record-list routines
+;;(define (build-account-record-list account-list income-list expense-list)
+;;  (cond
+;;   ((null? account-list) '())
+;;   (else (let ( (account (car account-list)) )
+;;           (cond
+;;            ;; If this is an income account...
+;;            ((= (xaccAccountGetType account) ACCT-TYPE-INCOME)
+;;             (let ()
+;;               (build-income-account-record-list account income-list)))
+;;            ((= (xaccAccountGetType account) ACCT-TYPE-EXPENSE)
+;;             (let ()
+;;               (build-expense-account-record-list account expense-list))))
+;;           (build-account-record-list (cdr account-list) income-list expense-list))
+;;         ))
+;;  )
+
+
+
+
+(define (build-expense-account-record-list root-account expense-list)
+  (gnc:debug "DEVBGT: " (xaccAccountGetName root-account))
+)
+
 
 (define reportname (N_ "Development Budget"))
 
@@ -40,15 +259,14 @@
       (lambda () (cons 'relative 'start-cal-year))
       #f
       'both
-      '(
-	today
-	start-this-month
-	start-prev-month
-	start-current-quarter
-	start-prev-quarter
-	start-cal-year
-	start-prev-year
-	start-accounting-period)))
+      '( today
+         start-this-month
+         start-prev-month
+         start-current-quarter
+         start-prev-quarter
+         start-cal-year
+         start-prev-year
+         start-accounting-period)))
 
     (add-option
      (gnc:make-number-range-option
@@ -63,43 +281,35 @@
 
     (add-option
      (gnc:make-simple-boolean-option
-      (N_ "General") (N_ "Generate Year to Date (YTD) column.")
-      "c"
-      (N_ "Selecting this adds a column at the end of the report that is a YTD.")
+      (N_ "General") (N_ "Generate Totals Column")
+      "ca"
+      (N_ "Selecting this adds a column at the end of the report that shows the individual account totals across the entire report time period.")
       #t))
 
     (add-option
      (gnc:make-simple-boolean-option
-      (N_ "General") (N_ "Generate End of Year (EOY) column.")
-      "da"
-      (N_ "Selecting this adds a column at the end of the report that uses the date below to create a column of year totals.")
+      (N_ "General") (N_ "Generate YTD Totals Column")
+      "cb"
+      (N_ "Selecting this adds a column at the end of the report that shows the Year-to-Date totals for each account.")
       #f))
 
-    (add-option
-     (gnc:make-date-option
-      (N_ "General")
-      (N_ "End of Year (EOY) Date")
-      "db"
-      (N_ "Select which date to generating the EOY column for. ONLY THE YEAR IS USED.")
-      (lambda () (cons 'relative 'start-cal-year))
-      #f
-      'both
-      '(
-	today
-	start-this-month
-	start-prev-month
-	start-current-quarter
-	start-prev-quarter
-	start-cal-year
-	start-prev-year
-	start-accounting-period)))
-
-    (add-option
-     (gnc:make-simple-boolean-option
-      (N_ "General") (N_ "Include accounts with only actual values.")
-      "dc"
-      (N_ "Selecting this adds a column at the end of the report that is a YTD.")
-      #t))
+;;    (add-option
+;;     (gnc:make-date-option
+;;      (N_ "General")
+;;      (N_ "Account Totals Date")
+;;      "da"
+;;      (N_ "Select which date to use in generating the account totals column.")
+;;      (lambda () (cons 'relative 'end-cal-year))
+;;      #f
+;;      'both
+;;      '( today
+;;         end-this-month
+;;         end-prev-month
+;;         end-current-quarter
+;;         end-prev-quarter
+;;         end-cal-year
+;;         end-prev-year
+;;         end-accounting-period)))
 
 
     ;; This is a color option, defined by rgba values. A color value
@@ -194,6 +404,8 @@
   (define (op-value section name)
     (gnc:option-value (get-op section name)))
 
+
+
   ;; Find the start period in the budget that is the same month and year as the start date
   (define (get-start-period bdgt start-date)
     (let ((bdgt-start-date (car (gnc-budget-get-period-start-date bdgt 0)))
@@ -202,587 +414,485 @@
        ((< start-date bdgt-start-date) (inexact->exact period))
        (else (inexact->exact (+ period (- (gnc:date-to-month-fraction start-date) (gnc:date-to-month-fraction bdgt-start-date))))))))
 
-  ;; Find the first period for the End of Year date given
-  (define (get-eoy-start-period bdgt eoy-date period)
-    (let ((bdgt-start-date (car (gnc-budget-get-period-start-date bdgt period))))
+  (define (get-sumcol-period bdgt end-date)
+    (let ((bdgt-start-date (car (gnc-budget-get-period-start-date bdgt 0)))
+          (bdgt-end-date (car (gnc-budget-get-period-end-date bdgt 12)))
+	  (period 0))
       (cond
-       ((= (gnc:date-get-year (localtime eoy-date)) (gnc:date-get-year (localtime bdgt-start-date))) (inexact->exact period))
-       (else (get-eoy-start-period bdgt eoy-date (+ period 1))))))
+       ((> end-date bdgt-end-date) (inexact->exact bdgt-end-date))
+       (else (inexact->exact (+ period (- (gnc:date-to-month-fraction end-date) (gnc:date-to-month-fraction bdgt-start-date))))))))
 
-  ;; Find the number of periods for the End of Year date given
-  (define (get-eoy-end-period bdgt eoy-date period)
-    (let ((bdgt-start-date (car (gnc-budget-get-period-start-date bdgt period))))
-      (cond
-       ((= (gnc:date-get-year (localtime eoy-date)) (gnc:date-get-year (localtime bdgt-start-date)))
-	(get-eoy-end-period bdgt eoy-date (+ period 1)))
-       (else (inexact->exact (- period 1))))))
 
-  ;; Returns a list of dates for the budget
-  (define (budget-date-list bdgt period num-periods)
+
+
+
+;; HTML functions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Creates a row out of a title and a list of values
+(define (build-html-row table values header? span-list color-list align-list row-base-color)
+  (gnc:html-table-append-row! table (build-html-cell-list values header? span-list color-list align-list row-base-color)))
+
+
+;; Creates a list of cells
+(define (build-html-cell-list values header? span-list color-list align-list row-base-color)
+  (let ((cell (gnc:make-html-table-cell)))
+    ;;Keep going until there are no values left to generate
     (cond
-     ((= num-periods 0) (let ((eoy-string (string-append "End Of Year (" (gnc:date-get-year-string (localtime (car (gnc:date-option-absolute-time (op-value "General" "End of Year (EOY) Date"))))) ")")))
-			  (if (op-value "General" "Generate Year to Date (YTD) column.")
-			      (if (op-value "General" "Generate End of Year (EOY) column.")
-				  (list "Year To Date" eoy-string)
-				  '("Year To Date"))
-			      (if (op-value "General" "Generate End of Year (EOY) column.")
-				  (list eoy-string)
-				  '()))))
-     (else (cons (gnc:date-get-month-year-string (gnc:timepair->date (gnc-timespec2timepair (gnc-budget-get-period-start-date bdgt (inexact->exact period)))))
-		 (budget-date-list bdgt (+ period 1) (- num-periods 1))))))
+     ((null? values) '())
+     (else (cons (build-html-cell cell (car values) header? (car span-list) (car color-list) (car align-list) row-base-color)
+                 (build-html-cell-list (cdr values) header? (cdr span-list) (cdr color-list) (cdr align-list) row-base-color))))))
 
-  ;; Creates a row out of a title and a list of values
-  (define (build-html-row header bold span-list table values color-list align-list row-base-color)
-    (gnc:html-table-append-row! table (build-html-cell-list header bold span-list values color-list align-list row-base-color)))
 
-  ;; Creates a list of cells
-  (define (build-html-cell-list header bold span-list values color-list align-list row-base-color)
-    (let ((cell (gnc:make-html-table-cell)))
-      ;;Keep going until there are no values left to generate
-      (cond
-       ((null? values) '())
-       (else (cons (build-html-cell header bold (car span-list) cell (car values) (car color-list) (car align-list) row-base-color)
-		   (build-html-cell-list header bold (cdr span-list) (cdr values) (cdr color-list) (cdr align-list) row-base-color))))))
+;; Creates a cell with the value passed in
+(define (build-html-cell cell value header? span color align row-base-color)
 
-  ;; Turns a number into a hex-string
-  (define (number->hex-string number)
-    (number->string number 16))
+  ;; Start out by making the cell the first thing in the list
+  (let ((attribute-list (list cell))
+        (cell-color (get-cell-color-string color row-base-color))
+        (pre-value "")
+        (post-value ""))
 
-  ;; Turns a hex-string into a number
-  (define (hex-string->number hex-string)
-    (string->number hex-string 16))
+    ;;Set the attribute list for a cell
+    (set! attribute-list (append attribute-list (list "td")))
 
-  ;; Returns a hex string of 2 characters if it is over 255
-  ;;  then it returns ff otherwise it returns the value of the number in a hex-string
-  (define (single-color-string num base-num)
-    (let ((sum-string (number->hex-string (- base-num (- 255 num)))))
-      (cond
-       ((= (string-length sum-string) 2) sum-string)
-       ((< (string-length sum-string) 2) (string-append "0" sum-string))
-       (else (number->hex-string 0)))))
+    ;;If it is a header row increase the font by 1
+    (if (eqv? header? #t)
+        (set! attribute-list (append attribute-list (list 'font-size "+1"))))
 
-  ;; Returns a hex string with a # and the beginning
-  ;;  Calculate each color independently so overflow from one doesn't mix into the next
-  (define (get-cell-color-string color base-color)
-    (string-append "#"
-		   (single-color-string (hex-string->number (substring color 0 2)) (hex-string->number (substring base-color 0 2)))
-		   (single-color-string (hex-string->number (substring color 2 4)) (hex-string->number (substring base-color 2 4)))
-		   (single-color-string (hex-string->number (substring color 4 6)) (hex-string->number (substring base-color 4 6)))))
+    ;;List all the attributes that are desired
+    (set! attribute-list (append attribute-list (list 'attribute (list "align" align))))
+    (set! attribute-list (append attribute-list (list 'attribute (list "nowrap" "nowrap"))))
 
-  ;; Creates a cell with the value passed in
-  (define (build-html-cell header bold span cell value color align row-base-color)
+    ;;Set the color to the color passed in
+    (set! attribute-list (append attribute-list (list 'attribute (list "bgcolor" cell-color))))
 
-    ;; Start out by making the cell the first thing in the list
-    (let ((attribute-list (list cell))
-	  (cell-color (get-cell-color-string color row-base-color))
-	  (pre-value "")
-	  (post-value ""))
+    ;;If the number is negative set the text color to red
+    (if (gnc:gnc-monetary? value)
+        (if (gnc-numeric-negative-p (gnc:gnc-monetary-amount value))
+            (set! attribute-list (append attribute-list (list 'font-color "#FF0000")))))
 
-      ;;Set the attribute list for a cell
-      (set! attribute-list (append attribute-list (list "td")))
+    ;;Set the column span
+    (gnc:html-table-cell-set-colspan! cell span)
 
-      ;;If it is a header row increase the font by 1
-      (if (eqv? header #t)
-	  (set! attribute-list (append attribute-list (list 'font-size "+1"))))
+    ;;Apply all the attributes to the cell and then add the value to the cell
+    (apply gnc:html-table-cell-set-style! attribute-list)
+    (gnc:html-table-cell-append-objects! cell pre-value value post-value))
 
-      ;;If the values should be bolded that set the bold tags
-      (if (eqv? bold #t) (let ()
-			   (set! pre-value "<b>")
-			   (set! post-value "</b>")))
+  ;;Return the cell
+  cell)
 
-      ;;List all the attributes that are desired
-      (set! attribute-list (append attribute-list (list 'attribute (list "align" align))))
-      (set! attribute-list (append attribute-list (list 'attribute (list "nowrap" "nowrap"))))
 
-      ;;Set the color to the color passed in
-      (set! attribute-list (append attribute-list (list 'attribute (list "bgcolor" cell-color))))
 
-      ;;If the number is negative set the text color to red
-      (if (gnc:gnc-monetary? value)
-	  (if (gnc-numeric-negative-p (gnc:gnc-monetary-amount value))
-	      (set! attribute-list (append attribute-list (list 'font-color "#FF0000")))))
 
-      ;;Set the column span
-      (gnc:html-table-cell-set-colspan! cell span)
+;; Creates a row out of a title and a list of values
+(define (build-html-budget-report-row table values header? bold? span-list color-list align-list row-base-color)
+  (gnc:html-table-append-row! table (build-html-cell-list values header? bold? span-list color-list align-list row-base-color)))
 
-      ;;Apply all the attributes to the cell and then add the value to the cell
-      (apply gnc:html-table-cell-set-style! attribute-list)
-      (gnc:html-table-cell-append-objects! cell pre-value value post-value))
 
-    ;;Return the cell
-    cell)
-
-  ;; Returns the Year to Date budget account and difference value
-  (define (ytd-budget-act-diff bdgt acnt start-period curr-period bdgt-cc act-cc diff-cc comm)
+;; Creates a list of cells
+(define (build-html-budget-report-cell-list values header? bold? span-list color-list align-list row-base-color)
+  (let ((cell (gnc:make-html-table-cell)))
+    ;;Keep going until there are no values left to generate
     (cond
-     ((> start-period curr-period) (list (bdgt-cc 'getmonetary comm #f) (act-cc 'getmonetary comm #f) (diff-cc 'getmonetary comm #f)))
-     (else (let ()
-	     (budget-act-diff-cc bdgt acnt start-period bdgt-cc act-cc diff-cc comm)
-	     (ytd-budget-act-diff bdgt acnt (+ start-period 1) curr-period bdgt-cc act-cc diff-cc comm)))))
+     ((null? values) '())
+     (else (cons (build-html-cell cell (car values) header? bold? (car span-list) (car color-list) (car align-list) row-base-color)
+                 (build-html-cell-list (cdr values) header? bold? (cdr span-list) (cdr color-list) (cdr align-list) row-base-color))))))
 
-  ;; Returns the End of Year budget account and difference value
-  (define (eoy-budget-act-diff bdgt acnt start-period end-period bdgt-cc act-cc diff-cc comm)
+
+;; Creates a cell with the value passed in
+(define (build-html-budget-report-cell cell value header? bold? span color align row-base-color)
+
+  ;; Start out by making the cell the first thing in the list
+  (let ((attribute-list (list cell))
+        (cell-color (get-cell-color-string color row-base-color))
+        (pre-value "")
+        (post-value ""))
+
+    ;;Set the attribute list for a cell
+    (set! attribute-list (append attribute-list (list "td")))
+
+    ;;If it is a header row increase the font by 1
+    (if (eqv? header? #t)
+        (set! attribute-list (append attribute-list (list 'font-size "+1"))))
+
+    ;;If the values should be bolded that set the bold tags
+    (if (eqv? bold? #t) (let ()
+                         (set! pre-value "<b>")
+                         (set! post-value "</b>")))
+
+    ;;List all the attributes that are desired
+    (set! attribute-list (append attribute-list (list 'attribute (list "align" align))))
+    (set! attribute-list (append attribute-list (list 'attribute (list "nowrap" "nowrap"))))
+
+    ;;Set the color to the color passed in
+    (set! attribute-list (append attribute-list (list 'attribute (list "bgcolor" cell-color))))
+
+    ;;If the number is negative set the text color to red
+    (if (gnc:gnc-monetary? value)
+        (if (gnc-numeric-negative-p (gnc:gnc-monetary-amount value))
+            (set! attribute-list (append attribute-list (list 'font-color "#FF0000")))))
+
+    ;;Set the column span
+    (gnc:html-table-cell-set-colspan! cell span)
+
+    ;;Apply all the attributes to the cell and then add the value to the cell
+    (apply gnc:html-table-cell-set-style! attribute-list)
+    (gnc:html-table-cell-append-objects! cell pre-value value post-value))
+
+  ;;Return the cell
+  cell)
+
+
+
+  ;; Returns the a commodity collect for the budget, actual, and difference amount
+;;  (define (budget-actual-difference-cc bdgt acnt period bdgt-cc act-cc diff-cc comm)
+;;    (let* ((bdgt-val (gnc-budget-get-account-period-value bdgt acnt period))
+;;           (act-val  (gnc-budget-get-account-period-actual-value bdgt acnt period))
+;;           (bdgt-denom (gnc:gnc-numeric-denom bdgt-val))
+;;           (act-denom  (gnc:gnc-numeric-denom act-val)))
+;;
+;;      ;; If the denom is not 100 make it 100
+;;      (if (< bdgt-denom 100)
+;;          (set! bdgt-val (gnc:make-gnc-numeric (* (gnc:gnc-numeric-num bdgt-val) (/ 100 bdgt-denom))
+;;                                               100)))
+;;
+;;      (if (< act-denom 100)
+;;          (set! act-val (gnc:make-gnc-numeric (* (gnc:gnc-numeric-num act-val) (/ 100 act-denom))
+;;                                              100)))
+;;
+;;      ;; If it is an INCOME account negate the number because of the way it is stored
+;;      (if (or (= (xaccAccountGetType acnt) ACCT-TYPE-INCOME) (= (xaccAccountGetType acnt) ACCT-TYPE-EQUITY))
+;;          (set! act-val (gnc-numeric-neg act-val)))
+;;
+;;      ;;Create commodity collectors to be able to be able subtract the two values from each other for a diff
+;;      (bdgt-cc 'add comm bdgt-val)
+;;      (act-cc 'add comm act-val)
+;;
+;;      ;;Clear the diff-cc back to zero
+;;      (diff-cc 'minusmerge diff-cc #f)
+;;
+;;      ;; If it is an INCOME account subtract the budget from the actual
+;;      ;; Else it is an Expense account so subtract the actual from the budget
+;;      (cond
+;;       ((or (= (xaccAccountGetType acnt) ACCT-TYPE-INCOME) (= (xaccAccountGetType acnt) ACCT-TYPE-EQUITY))
+;;        (let ()
+;;          (diff-cc 'merge act-cc #f)
+;;          (diff-cc 'minusmerge bdgt-cc #f)))
+;;       (else
+;;        (let ()
+;;          (diff-cc 'merge bdgt-cc #f)
+;;          (diff-cc 'minusmerge act-cc #f))))
+;;      ))
+
+
+  ;; Returns the a commodity collect for the budget, actual, and difference amount
+  (define (budget-cc-list bdgt acnt start-period num-periods comm)
     (cond
-     ((> start-period end-period) (list (bdgt-cc 'getmonetary comm #f) (act-cc 'getmonetary comm #f) (diff-cc 'getmonetary comm #f)))
-     (else (let ()
-	     (budget-act-diff-cc bdgt acnt start-period bdgt-cc act-cc diff-cc comm)
-	     (eoy-budget-act-diff bdgt acnt (+ start-period 1) end-period bdgt-cc act-cc diff-cc comm)))))
+     ( (= num-periods 0) '() )
+     (else
+      (let* ( (bdgt-cc  (gnc:make-commodity-collector))
+              (bdgt-val (gnc-budget-get-account-period-value bdgt acnt start-period))
+              (bdgt-denom (gnc:gnc-numeric-denom bdgt-val)))
 
-  ;; Returns the a commodity collect for the budget actual and difference amount
-  (define (budget-act-diff-cc bdgt acnt period bdgt-cc act-cc diff-cc comm)
-    (let* ((bdgt-val (gnc-budget-get-account-period-value bdgt acnt period))
-	   (act-val  (gnc-budget-get-account-period-actual-value bdgt acnt period))
-	   (bdgt-denom (gnc:gnc-numeric-denom bdgt-val))
-	   (act-denom  (gnc:gnc-numeric-denom act-val)))
+        ;; If the denom is not 100 make it 100
+        (if (< bdgt-denom 100)
+            (set! bdgt-val (gnc:make-gnc-numeric (* (gnc:gnc-numeric-num bdgt-val) (/ 100 bdgt-denom))
+                                                 100)))
 
-      ;; If the denom is not 100 make it 100
-      (if (< bdgt-denom 100)
-	  (set! bdgt-val (gnc:make-gnc-numeric (* (gnc:gnc-numeric-num bdgt-val) (/ 100 bdgt-denom))
-					       100)))
+        ;;Create commodity collectors to be able to be able subtract the two values from each other for a diff
+        (bdgt-cc 'add comm bdgt-val)
 
-      (if (< act-denom 100)
-	  (set! act-val (gnc:make-gnc-numeric (* (gnc:gnc-numeric-num act-val) (/ 100 act-denom))
-					       100)))
-
-      ;; If it is an INCOME account negate the number because of the way it is stored
-      (if (or (= (xaccAccountGetType acnt) ACCT-TYPE-INCOME) (= (xaccAccountGetType acnt) ACCT-TYPE-EQUITY))
-	  (set! act-val (gnc-numeric-neg act-val)))
-
-      ;;Create commodity collectors to be able to be able subtract the two values from each other for a diff
-      (bdgt-cc 'add comm bdgt-val)
-      (act-cc 'add comm act-val)
-
-      ;;Clear the diff-cc back to zero
-      (diff-cc 'minusmerge diff-cc #f)
-
-      ;; If it is an INCOME account subtract the budget from the actual
-      ;; Else it is an Expense account so subtract the actual from the budget
-      (cond
-       ((or (= (xaccAccountGetType acnt) ACCT-TYPE-INCOME) (= (xaccAccountGetType acnt) ACCT-TYPE-EQUITY))
-	(let ()
-	  (diff-cc 'merge act-cc #f)
-	  (diff-cc 'minusmerge bdgt-cc #f)))
-       (else
-	(let ()
-	  (diff-cc 'merge bdgt-cc #f)
-	  (diff-cc 'minusmerge act-cc #f))))))
-
-  ;; Returns a list that has a budget values, account values and the difference for all the periods
-  (define (account-budget-act-diff-row bdgt acnt start-period num-periods)
-    (let ((comm (xaccAccountGetCommodity acnt))
-	  (bdgt-cc  (gnc:make-commodity-collector))
-	  (act-cc   (gnc:make-commodity-collector))
-	  (diff-cc  (gnc:make-commodity-collector)))
-
-      ;;If the number of periods is 0 stop processing
-      ;; When returning the commodity values just return a value with the commodity symbol in from
-      (cond
-       ((= num-periods 0) (let* ((ytd-start-period (get-start-period bdgt (car (gnc:get-start-cal-year))))
-				 (ytd-curr-period  (get-start-period bdgt (car (gnc:get-start-this-month))))
-				 (eoy-start-period
-				  (get-eoy-start-period bdgt (car (gnc:date-option-absolute-time (op-value "General" "End of Year (EOY) Date"))) 0))
-				 (eoy-end-period
-				  (get-eoy-end-period bdgt (car (gnc:date-option-absolute-time (op-value "General" "End of Year (EOY) Date"))) eoy-start-period)))
-			    (if (op-value "General" "Generate Year to Date (YTD) column.")
-				(if(op-value "General" "Generate End of Year (EOY) column.")
-				   (append (ytd-budget-act-diff bdgt
-								acnt
-								ytd-start-period
-								ytd-curr-period
-								bdgt-cc
-								act-cc
-								diff-cc
-								comm)
-					   (eoy-budget-act-diff bdgt
-								acnt
-								eoy-start-period
-								eoy-end-period
-								bdgt-cc
-								act-cc
-								diff-cc
-								comm))
-				   (ytd-budget-act-diff bdgt
-							acnt
-							ytd-start-period
-							ytd-curr-period
-							bdgt-cc
-							act-cc
-							diff-cc
-							comm))
-				(if(op-value "General" "Generate End of Year (EOY) column.")
-				    (eoy-budget-act-diff bdgt
-							 acnt
-							 eoy-start-period
-							 eoy-end-period
-							 bdgt-cc
-							 act-cc
-							 diff-cc
-							 comm)
-				    '()))))
-       (else (let ((bdgt-val (gnc-budget-get-account-period-value bdgt acnt start-period))
-		   (act-val  (gnc-budget-get-account-period-actual-value bdgt acnt start-period)))
-
-	       (budget-act-diff-cc bdgt acnt start-period bdgt-cc act-cc diff-cc comm)
-
-	       ;;Return the budget actual and differential amount
-	       (append (list (bdgt-cc 'getmonetary comm #f)
-			     (act-cc 'getmonetary comm #f)
-			     (diff-cc 'getmonetary comm #f))
-		       (account-budget-act-diff-row bdgt acnt (+ start-period 1) (- num-periods 1))))))))
+        ;; return a list
+        (cons bdgt-cc (budget-cc-list bdgt acnt (+ start-period 1) (- num-periods 1) comm))
+        ))))
 
 
-
-  ;; Adds values in the account list of values to the totals list
-  (define (add-acnt-vals-to-totals acnt-values totals-list)
+  ;; Returns the a commodity collect for the budget, actual, and difference amount
+  (define (actual-cc-list bdgt acnt start-period num-periods comm)
     (cond
-     ((null? acnt-values) '())
-     (else (let* ((acnt-val  (gnc:gnc-monetary-amount (car acnt-values)))
-		  (total-val (gnc:gnc-monetary-amount (car totals-list)))
-		  (total-cc  (gnc:make-commodity-collector))
-		  (comm      (gnc:gnc-monetary-commodity (car acnt-values))))
-	     (total-cc 'add comm total-val)
-	     (total-cc 'add comm acnt-val)
-	     (cons (total-cc 'getmonetary comm #f) (add-acnt-vals-to-totals (cdr acnt-values) (cdr totals-list)))))))
+     ( (= num-periods 0) '() )
+     (else
+      (let* ( (act-cc   (gnc:make-commodity-collector))
+              (act-val  (gnc-budget-get-account-period-actual-value bdgt acnt start-period))
+              (act-denom  (gnc:gnc-numeric-denom act-val)))
 
-  ;; Adds a row for each account in the account list
-  ;;  with a budget value, real account value and difference for every period
-  (define (build-value-html-table table acnt-list bdgt start-period num-periods color-list align-list totals-list row-color-1 row-color-2)
-    (let ((row-color (if (odd? (length acnt-list))
-			 row-color-1
-			 row-color-2)))
+        (if (< act-denom 100)
+            (set! act-val (gnc:make-gnc-numeric (* (gnc:gnc-numeric-num act-val) (/ 100 act-denom))
+                                                100)))
 
-      ;;When the account list is empty stop
-      ;;Otherwise add another row starting with account name and call the function again
-      (cond
-       ((null? acnt-list) (let ()
-			    ;;Build the Totals Row
-			    (build-html-row #f #t (gen-list (+ (length totals-list) 1) 1) table (cons "Totals" totals-list) color-list align-list row-color)
-			    totals-list))
-       (else (let* ((acnt (car acnt-list))
-		    (acnt-values (account-budget-act-diff-row bdgt acnt start-period num-periods)) ;Generates a list of values of the account
-		    (temp-totals-list (add-acnt-vals-to-totals acnt-values totals-list))           ;Adds the values to the total values
-		    (acnt-name-values (cons (gnc:html-account-anchor acnt) acnt-values)))          ;Adds the account name to the beginning of the account value list
-	       (build-html-row #f #f (gen-list (length acnt-name-values) 1) table acnt-name-values color-list align-list row-color)
-	       (build-value-html-table table (cdr acnt-list) bdgt start-period num-periods color-list align-list temp-totals-list row-color-1 row-color-2))))))
+        ;; If it is an INCOME account negate the number because of the way it is stored
+        (if (or (= (xaccAccountGetType acnt) ACCT-TYPE-INCOME) (= (xaccAccountGetType acnt) ACCT-TYPE-EQUITY))
+            (set! act-val (gnc-numeric-neg act-val)))
 
-  ;; Span List for Date header
-  ;;  The first cell is 1 and all the rest are 3
-  ;;  The first one is for account name the rest or for periods
-  (define (date-header-span-list num-periods)
-    (cons '1 (gen-list num-periods 3)))
+        ;;Create commodity collectors to be able to be able subtract the two values from each other for a diff
+        (act-cc 'add comm act-val)
 
-  ;; Generate a list of the lenght of num-times and of the value passed in
-  (define (gen-list num-times value)
+        ;; return a list
+        (cons act-cc (actual-cc-list bdgt acnt (+ start-period 1) (- num-periods 1) comm))
+      ))))
+
+
+  ;; Returns the a commodity collect for the budget, actual, and difference amount
+  (define (difference-cc-list acnt bdgt-cc-list act-cc-list comm)
     (cond
-     ((= num-times 0) '())
-     (else (cons value (gen-list (- num-times 1) value)))))
+     ((or (null? bdgt-cc-list) (null? act-cc-list) '()))
+     (else
+      (let* ( (diff-cc  (gnc:make-commodity-collector)) )
 
-  ;; Budget Actual Difference header builder
-  ;;  This builds a list with Budget Actual and Difference
-  ;;  repeated for the number of periods passed in
-  (define (budget-actual-diff-header num-periods)
+        ;;Clear the diff-cc back to zero
+        (diff-cc 'minusmerge diff-cc #f)
+
+        ;; If it is an INCOME account subtract the budget from the actual
+        ;; Else it is an Expense account so subtract the actual from the budget
+        (cond
+         ((or (= (xaccAccountGetType acnt) ACCT-TYPE-INCOME) (= (xaccAccountGetType acnt) ACCT-TYPE-EQUITY))
+          (let ()
+            (diff-cc 'merge (car act-cc-list) #f)
+            (diff-cc 'minusmerge (car bdgt-cc-list) #f)))
+         (else
+          (let ()
+            (diff-cc 'merge (car bdgt-cc-list) #f)
+            (diff-cc 'minusmerge (car act-cc-list) #f))))
+
+        (cons diff-cc (difference-cc-list acnt (cdr bdgt-cc-list) (cdr act-cc-list) comm))
+        ))))
+
+
+
+
+  (define (build-account-record-list budget account-list start-period num-periods)
     (cond
-     ((= num-periods 0) '())
-     (else (append (list 'Budget 'Actual 'Diff) (budget-actual-diff-header (- num-periods 1))))))
+     ((null? account-list) '())
+     (else (let* ( (new-record (blank-budget-record))
+                   (account (car account-list))
+                   (comm (xaccAccountGetCommodity account))
+                   (children (gnc-account-get-children account))
+                   (budget-total (gnc:make-commodity-collector))
+                   (actual-total (gnc:make-commodity-collector))
+                   (diff-total (gnc:make-commodity-collector))
+                   (children-list '())
+                   (sum-list '()) )
+             (budget-record-set-account!      new-record account)
+             (budget-record-set-code!         new-record (xaccAccountGetCode account))
+             (budget-record-set-placeholder?! new-record (xaccAccountGetPlaceholder account))
+             (budget-record-set-namelink!     new-record (account-link account))
+             (budget-record-set-commodity!    new-record comm)
+             (budget-record-set-children!     new-record (build-account-record-list budget children start-period num-periods))
 
-  ;; Build a color list for the date table
-  (define (date-header-color-list num-periods)
+
+             (budget-record-set-actual-cc!    new-record (actual-cc-list budget account start-period num-periods comm))
+             (budget-record-set-budget-cc!    new-record (budget-cc-list budget account start-period num-periods comm))
+             (gnc:debug "DEVBGT: Actual list has value: " (cc-list-nonzero? (budget-record-actual-cc  new-record)))
+             (gnc:debug "DEVBGT: Budget list has value: " (cc-list-nonzero? (budget-record-budget-cc  new-record)))
+
+;;             (if (and (not (cc-list-nonzero? (budget-record-budget-cc new-record)))
+;;                      (budget-record-placeholder? new-record))
+;;                 (budget-record-set-budget-cc! new-record
+;;                                               (sum-budget-list-for-budget-record-list (budget-record-children new-record))) )
+;;             (set! children-list (budget-record-children new-record))
+             (set! sum-list (sum-budget-list-for-budget-record-list (budget-record-children new-record)))
+;;             (set! sum-list (sum-cc-lists (budget-record-budget-cc new-record) (budget-record-actual-cc new-record)))
+
+             (budget-record-set-diff-cc!      new-record (difference-cc-list account (budget-record-budget-cc new-record) (budget-record-actual-cc new-record) comm))
+
+             ;; Make totals
+             (actual-total 'merge (total-cc-list (budget-record-actual-cc  new-record)) #f)
+             (budget-total 'merge (total-cc-list (budget-record-budget-cc  new-record)) #f)
+             (diff-total 'merge (total-cc-list (budget-record-diff-cc  new-record)) #f)
+             ;;(gnc:debug "DEVBGT: Budget total: " (budget-total 'getmonetary comm #f))
+
+             (budget-record-set-actual-total-cc!  new-record actual-total)
+             (budget-record-set-budget-total-cc!  new-record budget-total)
+             (budget-record-set-diff-total-cc!    new-record diff-total)
+
+             (cons new-record (build-account-record-list budget (cdr account-list) start-period num-periods)) )
+         ) ;; else
+   ) ;; cond
+  )
+
+
+;;  (define (is-cc-list-zero cc-list comm)
+;;    (cond
+;;     ( (null? cc-list) #t)
+;;     (else (let* ( (cc (car cc-list))
+;;                   (val (gnc:gnc-monetary-amount (cc 'getmonetary comm #f))) )
+;;             (cond
+;;              ( (gnc-numeric-zero-p val) #f )
+;;              (else (is-cc-list-zero (cdr cc-list comm))))
+;;             ))
+;;     ))
+;;
+;;
+;;  (define (sum-children-budget-cc-list children-record-list)
+;;    (let ( (budget-cc-list (budget-record-budget-cc (car children-record-list)))
+;;           (summed-budget-cc-list (sum-children-budget-cc-list (cdr children-record-list))) )
+;;      (cond
+;;      ))
+;;
+;;
+;;  (define (sum-cc-list first-list second-list)
+;;    (cond
+;;     ( (or (null? first-list) (null? second-list)) '())
+;;     (else (let ( (first (car first-list))
+;;                  (second (car second-list)) )
+;;             (cons (first 'merge second #f) (sum-cc-list (cdr first-list) (cdr second-list)))
+;;             ))
+
+
+(define (to-monetary-list cc-list comm)
+  (cond
+   ( (null? cc-list) '() )
+   (else (let ( (cc (car cc-list)) )
+           (cons (cc 'getmonetary comm #f) (to-monetary-list (cdr cc-list) comm)))
+         )))
+
+(define (total-cc-list cc-list)
+  (cond
+   ( (null? cc-list) (gnc:make-commodity-collector) )
+   (else (let ( (cc (total-cc-list (cdr cc-list))) )
+           (cc 'merge (car cc-list) #f)
+           cc))))
+
+;; returns #f of all collectors and all entries are zero value.
+(define (cc-list-nonzero? cc-list)
+  (let ( (result #t) )
     (cond
-     ((= num-periods 0) '())
-     ((odd? (inexact->exact num-periods)) (cons (gnc:color-option->hex-string (get-op "Color" "Column Color 2")) (date-header-color-list (- num-periods 1))))
-     ((even? (inexact->exact num-periods)) (cons (gnc:color-option->hex-string (get-op "Color" "Column Color 1")) (date-header-color-list (- num-periods 1))))))
-
-  ;; Build a list with 3 one color and 3 another color alternating every 3
-  (define (three-on-three-off-color num-periods)
-    (let ((color_1 (gnc:color-option->hex-string (get-op "Color" "Column Color 2")))
-	  (color_2 (gnc:color-option->hex-string (get-op "Color" "Column Color 1"))))
-    (cond
-     ((= num-periods 0) '())
-     ((odd? (inexact->exact num-periods)) (append (three-on-three-off-color (- num-periods 1))
-						  (list color_1 color_1 color_1)))
-     ((even? (inexact->exact num-periods)) (append (three-on-three-off-color (- num-periods 1))
-						   (list color_2 color_2 color_2))))))
-
-  ;; Build a header alignment list
-  (define (header-align-list num-periods)
-    (cond
-     ((= num-periods 0) '())
-     (else (cons 'center (header-align-list (- num-periods 1))))))
-
-  ;; Build an account values alignment list
-  (define (account-values-align-list num-periods)
-    (cond
-     ((= num-periods 0) '())
-     (else (cons 'right (account-values-align-list (- num-periods 1))))))
-
-  ;; Generates a list of gnc-monetary for collecting totals
-  (define (gen-list-monetary num-comm acnt)
-    (cond
-     ((= num-comm 0))
-     (else (let* ((comm (xaccAccountGetCommodity acnt))
-		  (temp-cc (gnc:make-commodity-collector)));
-	     (temp-cc 'add comm (gnc:make-gnc-numeric 0 100))
-	     (cons (temp-cc 'getmonetary comm #f) (gen-list-monetary (- num-comm 1) acnt))))))
-
-  ;; Generates a row of cells that creates line
-  (define (gen-horiz-line num-cells table)
-    (gnc:html-table-append-row! table (gen-horiz-line-cell-list num-cells)))
-
-  ;; Generates a list of cells that create a horizonal line
-  (define (gen-horiz-line-cell-list num-cells)
-    (cond
-     ((= num-cells 0) '())
-     (else (cons (gen-horiz-line-cell num-cells) (gen-horiz-line-cell-list (- num-cells 1))))))
+     ( (null? cc-list) result )
+     (else (set! result (and (gnc-commodity-collector-allzero? (car cc-list)) (cc-list-nonzero? (cdr cc-list)))) ))
+    result))
 
 
-  ;; Generate a list of cells
-  (define (gen-horiz-line-cell num-cells)
-    (let* ((cell (gnc:make-html-table-cell))
-	   (attribute-list (list cell))
-	   (pre-html-value "<b><sub>")
-	   (post-html-value "</sub></b>")
-	   (html-value ""))
+(define (sum-budget-list-for-budget-record-list record-list)
+  (cond
+   ( (null? record-list) '() )
+   (else
+    (let* ( (current-record (car record-list))
+            (current-budget-list (budget-record-budget-cc current-record))
+            (result-list (budget-record-budget-cc current-record)) )
+      (gnc:debug "DEVBGT: sum-budget name: " (xaccAccountGetName (budget-record-account current-record)))
+      (gnc:debug "  sum-budget list length: " (length (budget-record-budget-cc current-record)))
+      (gnc:debug "  sum-budget record-list length: " (length record-list))
+      (gnc:debug "  sum-budget cdr record-list length: " (length (cdr record-list)))
+      (gnc:debug "  sum-budget cdr record-list null?: " (not (null? (cdr record-list))))
+      (if (not (null? (cdr record-list)))
+          (set! result-list (sum-cc-lists current-budget-list (sum-budget-list-for-budget-record-list (cdr record-list))))
+          (gnc:debug "  sum-cc-lists call not executed"))
+      (gnc:debug "  sum-budget return  " (xaccAccountGetName (budget-record-account current-record)))
+      (gnc:debug "  sum-budget result length: " (length result-list))
+      result-list))))
 
-      (set! attribute-list (append attribute-list (list "td")))
+;;      (cond
+;;       ( (null? (cdr record-list)) current-budget-list )
+;;       (else (sum-cc-lists current-budget-list (sum-budget-list-for-budget-record-list (cdr record-list)))))
+;;      ))))
 
-      ;;Set the color to BLACK
-      (set! attribute-list (append attribute-list (list 'attribute (list "bgcolor" "#FFFFFF"))))
 
-      ;;Decrease the font size to make the row thinner
-      (set! attribute-list (append attribute-list (list 'font-size "1")))
+(define (sum-cc-lists first-list second-list)
+  (cond
+   ((or (null? first-list) (null? second-list))
+    (gnc:debug "1 sum-cc-lists: One of the lists is null.")
+    '())
+   ((or (null? (cdr first-list)) (null? (cdr second-list)))
+    (let ( (first (car first-list))
+           (second (car second-list)) )
+      (gnc:debug "2 First length " (length first-list) "    Second length " (length second-list))
+      (gnc:debug "2 First " first  "    Second length " second)
+      (first 'merge second #f)
+      (list first)))
+   (else
+    (let ( (first (car first-list))
+           (second (car second-list)) )
+      (gnc:debug "3 First length " (length first-list) "    Second length " (length second-list))
+      (gnc:debug "3 First " first  "    Second length " second)
+      (first 'merge second #f)
+      (cons first (sum-cc-lists (cdr first-list) (cdr second-list)))))))
 
-      ;;Apply all the attributes to the cell and then add the value to the cell
-      (apply gnc:html-table-cell-set-style! attribute-list)
-
-      ;;Set the column span
-;      (gnc:html-table-cell-set-colspan! cell num-cells)
-
-      ;;Add an horizonal line to the cell
-      ;; This is a hack.  GnuCash doesn't let you put nothing in a cell.
-      ;; If left empty GnCash puts in a <BR> tag which causes the cell to
-      ;; be the height of the font.  If it could be left empty then the
-      ;  height= could be used in the HTML to allw the cell to be made
-      ;; thin but since the cell can't be left blank we put in a "." and
-      ;; superscript it as small as it will go.
-      (gnc:html-table-cell-append-objects! cell pre-html-value html-value post-html-value)
-
-    ;;Return the cell
-    cell))
-
-  ;; Return and list that is a diff of the income and expense lists passed in
-  ;; Pass in the col-num because every 3 column is a diff column and has to be treated differently
-  (define (diff-income-expense-list income-list expense-list col-num)
-    (cond
-     ((null? income-list) '())
-     (else (let* ((income-val  (cond ;;Every third column is a diff row and the income diff has had its value inverted so we want to undo that invert on the diff columns
-				((= col-num 3)
-				 (set! col-num 0)
-				 (gnc:gnc-monetary-amount (gnc:monetary-neg (car income-list))))
-				(else
-				 (gnc:gnc-monetary-amount (car income-list)))))
-		  (expense-val (gnc:gnc-monetary-amount (gnc:monetary-neg (car expense-list)))) ;;Make the expense negative so when it adds it actually subtracts
-		  (diff-cc     (gnc:make-commodity-collector))
-		  (comm        (gnc:gnc-monetary-commodity (car income-list))))
-
-	     (diff-cc 'add comm income-val)
-	     (diff-cc 'add comm expense-val) ;;Expense was made negative early so this is actually a subtract
-	     (cons (diff-cc 'getmonetary comm #f) (diff-income-expense-list (cdr income-list) (cdr expense-list) (+ col-num 1)))))))
-
-  ;; This adds the Date, Budget Actual and Diff header to all the columns
-  (define (date-bdgt-act-diff-header-table table budget num-col start-period num-periods)
-    ;;Build the Date Header Row
-    (build-html-row #t
-		    #t
-		    (date-header-span-list (+ num-col 1))
-		    table
-		    (cons "Accounts" (budget-date-list budget start-period num-periods))
-		    (cons (gnc:color-option->hex-string (get-op "Color" "Column Color 1"))
-			  (reverse (date-header-color-list num-col)))
-		    (header-align-list (+ num-col 1))
-		    (gnc:color-option->hex-string (get-op "Color" "Row Color 1")))
-
-    ;;Build the Budget Actual Diff Header Row
-    (build-html-row #f
-		    #f
-		    (gen-list (+ (* num-col 3) 1) 1)
-		    table
-		    (cons " " (budget-actual-diff-header num-col))
-		    (cons (gnc:color-option->hex-string (get-op "Color" "Column Color 1"))
-			  (three-on-three-off-color num-col))
-		    (header-align-list (+ (* num-col 3) 1))
-		    (gnc:color-option->hex-string (get-op "Color" "Row Color 1"))))
-
-  ;; Generates part of the HTML table for a specific Account Catagory (ie Expense, Income)
-  (define (build-catagory-table table acnt-list catagory-name budget start-period num-periods num-col)
-    ;;Build Catagory Header
-    (build-html-row #t
-		    #t
-		    (gen-list (+ (* num-col 3) 1) 1)
-		    table
-		    (cons catagory-name (gen-list (* num-col 3) " "))
-		    (gen-list (+ (* num-col 3) 1)  (gnc:color-option->hex-string (get-op "Color" "Column Color 1")))
-		    (gen-list (+ (* num-col 3) 1) 'left)
-		    (gnc:color-option->hex-string (get-op "Color" "Row Color 1")))
-
-    ;;Put in the header for all the coloums
-    (date-bdgt-act-diff-header-table table budget num-col start-period num-periods)
-
-    ;;Build the rest of the table (This returns the totals array so make sure it is last or sets a variable that is returned)
-    (build-value-html-table table
-			    acnt-list
-			    budget
-			    start-period
-			    num-periods
-			    (cons (gnc:color-option->hex-string (get-op "Color" "Column Color 1"))
-				  (three-on-three-off-color num-col))
-			    (cons 'left (account-values-align-list (* num-col 3)))
-			    (gen-list-monetary (* num-col 3) (car acnt-list))
-			    (if (odd? (length acnt-list))
-				(gnc:color-option->hex-string (get-op "Color" "Row Color 2"))  ;;This ensures that the first row always starts with the same color
-				(gnc:color-option->hex-string (get-op "Color" "Row Color 1")))
-			    (if (odd? (length acnt-list))
-				(gnc:color-option->hex-string (get-op "Color" "Row Color 1"))  ;;This ensures that the first row always starts with the same color
-				(gnc:color-option->hex-string (get-op "Color" "Row Color 2")))))
-
-  ;; Add the totals at to the html table
-  (define (build-totals-table table budget num-col start-period num-periods income-totals-list expense-totals-list diff-totals-list)
-    ;;Put in the Totals header
-    (build-html-row #t
-		    #t
-		    (gen-list (+ (* num-col 3) 1) 1)
-		    table
-		    (cons "Totals" (gen-list (* num-col 3) " "))
-		    (gen-list (+ (* num-col 3) 1)  (gnc:color-option->hex-string (get-op "Color" "Column Color 1")))
-		    (gen-list (+ (* num-col 3) 1) 'left)
-		    (gnc:color-option->hex-string (get-op "Color" "Row Color 1")))
-
-    ;;Put in the header for all the columns
-    (date-bdgt-act-diff-header-table table budget num-col start-period num-periods)
-
-    ;;Put in the income row
-    (build-html-row #f
-		    #f
-		    (gen-list (length income-totals-list) 1)
-		    table
-		    income-totals-list
-		    (cons (gnc:color-option->hex-string (get-op "Color" "Column Color 1"))
-			  (three-on-three-off-color num-col))
-		    (cons 'left (account-values-align-list (* num-col 3)))
-		    (gnc:color-option->hex-string (get-op "Color" "Row Color 2")))
-
-    ;;Put in the expense row
-    (build-html-row #f
-		    #f
-		    (gen-list (length expense-totals-list) 1)
-		    table
-		    expense-totals-list
-		    (cons (gnc:color-option->hex-string (get-op "Color" "Column Color 1"))
-			  (three-on-three-off-color num-col))
-		    (cons 'left (account-values-align-list (* num-col 3)))
-		    (gnc:color-option->hex-string (get-op "Color" "Row Color 1")))
-
-    ;;Insert a horizontal line before the totals row
-;    (gen-horiz-line (+ (* num-col 3) 1) table)
-
-    ;;Put in the difference row
-    (build-html-row #f
-		    #t
-		    (gen-list (length diff-totals-list) 1)
-		    table
-		    diff-totals-list
-		    (cons (gnc:color-option->hex-string (get-op "Color" "Column Color 1"))
-			  (three-on-three-off-color num-col))
-		    (cons 'left (account-values-align-list (* num-col 3)))
-		    (gnc:color-option->hex-string (get-op "Color" "Row Color 2"))))
 
 
   ;; This is the main routine that puts it all together
   (let* ((document (gnc:make-html-document))
-	 (table (gnc:make-html-table))
-	 (income-totals '())
-	 (expense-totals '())
-	 (budget (op-value "General" "Budget"))
-	 (num-periods (op-value "General" "Number of Report Periods"))
-	 (start-period (get-start-period budget (car (gnc:date-option-absolute-time (op-value "General" "Start Date")))))
-	 (acnt-list (budget-account-list budget
-                                   (gnc-account-get-descendants-sorted (gnc-get-current-root-account))
-                                   start-period
-                                   num-periods
-                                   (op-value "General" "Include accounts with only actual values.") ))
-	 (num-col (if (op-value "General" "Generate Year to Date (YTD) column.")
-		      (if (op-value "General" "Generate End of Year (EOY) column.")
-			  (+ num-periods 2)
-			  (+ num-periods 1))
-		      (if (op-value "General" "Generate End of Year (EOY) column.")
-			  (+ num-periods 1)
-			  num-periods))))
+         (table (gnc:make-html-table))
+         ;;(income-accounts '())
+         ;;(expense-accounts '())
+         (budget (op-value "General" "Budget"))
+         (num-periods (op-value "General" "Number of Report Periods"))
+         (start-period (get-start-period budget (car (gnc:date-option-absolute-time (op-value "General" "Start Date")))))
+         (current-period (get-start-period budget (car (gnc:get-start-this-month))))
+         ;;(debug-port (open-output-file "budget-debug.txt"))
+         (debug-port (open-output-string))
+         (income-accounts (build-account-record-list budget (assoc-ref (gnc:decompose-accountlist (gnc-account-get-children (gnc-get-current-root-account)))  ACCT-TYPE-INCOME) start-period num-periods))
+         (expense-accounts (build-account-record-list budget (assoc-ref (gnc:decompose-accountlist (gnc-account-get-children (gnc-get-current-root-account)))  ACCT-TYPE-EXPENSE) start-period num-periods))
+
+
+;;	 (acnt-list (budget-account-list budget
+;;                                   (gnc-account-get-descendants-sorted (gnc-get-current-root-account))
+;;                                   start-period
+;;                                   num-periods
+;;                                   (op-value "General" "Include accounts with only actual values.") ))
+
+         ) ;; end let*
+
+
+;; (diff-cc 'getmonetary comm #f))
+
+    ;; Debug values
+    ;;(gnc:debug "DEVBGT: Budget start period.. " start-period "   Account totals period.. " acnt-totals-period)
+
+
 
     ;;Setup the Title and font color and back ground color of the document
     (gnc:html-document-set-title! document reportname)
     (gnc:html-document-set-style! document "body"
-				  'attribute (list "bgcolor" (gnc:color-option->html (get-op "Color" "Background Color")))
-				  'font-color (gnc:color-option->html (get-op "Color" "Text Color")))
-
-    (gnc:html-table-set-style! table "table"
-			       'attribute (list "border" 0)
-			       'attribute (list "cellspacing" 0)
-			       'attribute (list "cellpadding" 2))
+                                  'attribute (list "bgcolor" (gnc:color-option->html (get-op "Color" "Background Color")))
+                                  'font-color (gnc:color-option->html (get-op "Color" "Text Color")))
 
 
-    ;; Build the Income Table
-    (set! income-totals (build-catagory-table table
-					      (append (assoc-ref (gnc:decompose-accountlist acnt-list) ACCT-TYPE-INCOME) (assoc-ref (gnc:decompose-accountlist acnt-list) ACCT-TYPE-EQUITY))
-					      "Income"
-					      budget
-					      start-period
-					      num-periods
-					      num-col))
+;;    (gnc:html-document-add-object!
+;;     document
+;;     (gnc:make-html-text
+;;      (gnc:html-markup-p
+;;       (gnc:html-markup/format
+;;        (_ "The value is %d.")
+;;        (gnc:date-to-month-fraction end-date)
+;;        ;;(gnc:html-markup-b sumcol-period)))
+;;      ))
+    ;;(gnc:debug "Sum column period.. " (gnc:date-get-month-year-string (localtime (car (gnc:date-option-absolute-time (op-value "General" "Account Totals Date"))))))
+    ;;(gnc:debug "End period.. " (gnc:date-get-month-year-string (gnc:timepair->date (gnc-timespec2timepair (gnc-budget-get-period-end-date budget 0)))))
+;;    (budget-record-printer brec debug-port)
+;;    (gnc:debug "String port" (get-output-string debug-port))
 
-    ;;Put a blank row inbetween catagories
-    (build-html-row #f
-		    #f
-		    (gen-list (+ (* num-col 3) 1) 1)
-		    table
-		    (gen-list (+ (* num-col 3) 1) " ")
-		    (gen-list (+ (* num-col 3) 1)  (gnc:color-option->hex-string (get-op "Color" "Column Color 1")))
-		    (gen-list (+ (* num-col 3) 1) 'left)
-		    (gnc:color-option->hex-string (get-op "Color" "Row Color 1")))
 
-    ;;Build the Expense Table
-    (set! expense-totals (build-catagory-table table
-					       (assoc-ref (gnc:decompose-accountlist acnt-list) ACCT-TYPE-EXPENSE)
-					       "Expense"
-					       budget
-					       start-period
-					       num-periods
-					       num-col))
 
-    ;;Put a blank row inbetween catagories
-    (build-html-row #f
-		    #f
-		    (gen-list (+ (* num-col 3) 1) 1)
-		    table
-		    (gen-list (+ (* num-col 3) 1) " ")
-		    (gen-list (+ (* num-col 3) 1)  (gnc:color-option->hex-string (get-op "Color" "Column Color 1")))
-		    (gen-list (+ (* num-col 3) 1) 'left)
-		    (gnc:color-option->hex-string (get-op "Color" "Row Color 1")))
 
-    ;;Build and put in the totals table at the end
-    (build-totals-table table
-			budget
-			num-col
-			start-period
-			num-periods
-			(cons "Income Totals" income-totals)
-			(cons "Expense Totals" expense-totals)
-			(cons "Difference Totals" (diff-income-expense-list income-totals expense-totals 1)))
+
+
+
+
+
+    (budget-record-list-printer income-accounts debug-port)
+
+
+    (gnc:html-document-add-object!
+     document
+     (gnc:make-html-text
+      (gnc:html-markup-p
+       (gnc:html-markup-b (_ "Record output:")))
+      (gnc:html-markup-tt
+       (get-output-string debug-port))
+        ;;(gnc:html-markup-b sumcol-period)))
+      ))
+    (close-output-port debug-port)
+;;    (record-accessor newbudget 'budgetrec-printer)
 
     ;;Add the generated table to the document
-    (gnc:html-document-add-object! document table)
+;;    (gnc:html-document-add-object! document table)
 
     ;;Return the document
     document)
   )
+
+
 
 ;; Here we define the actual report with gnc:define-report
 (gnc:define-report
