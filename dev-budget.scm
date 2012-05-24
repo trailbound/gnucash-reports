@@ -49,23 +49,31 @@
 
 
 
-(define (budget-record-list-printer record-list port)
+(define (budget-record-list-printer record-list level port)
   (cond
    ((null? record-list) '())
    (else (let ( (rec (car record-list)) )
+           (define print-indent
+             (lambda (level)
+               (cond ((= level 0) '())
+                     (else (display "+")
+                           (print-indent (- level 1))))))
+           (display "<br>")
+           (print-indent level)
            (budget-record-printer rec port)
-           (budget-record-list-printer (budget-record-children rec) port)
-           (budget-record-list-printer (cdr record-list) port) ))))
+           (budget-record-list-printer (budget-record-children rec) (+ level 1) port)
+           (budget-record-list-printer (cdr record-list) level port) ))))
 
 ;; Budget record
 (define (budget-record-printer budget-record port)
     ;; budget-record printer.  This is for debugging reports, so it uses
     ;; HTML for pretty-printing
     (set-current-output-port port)
-    (display "<br>budget-record:-  ")
+    (display " budget-record:: ")
     (display " account: ")     (display (dump (xaccAccountGetName (budget-record-account budget-record))))
 ;;    (display " actual-cc-list: ")     (display (display-value-list (budget-record-actual-cc budget-record) (budget-record-commodity budget-record)))
-    (display " budget-cc-list: ")     (display (display-value-list (budget-record-budget-cc budget-record) (budget-record-commodity budget-record)))
+;;    (display " budget-cc-list: ")     (display (display-value-list (budget-record-budget-cc budget-record) (budget-record-commodity budget-record)))
+;;    (display " children: ")     (budget-record-list-printer (budget-record-children budget-record) port)
 
 ;;    (display " code: ")        (display (budget-record-code budget-record))
 ;;    (display " placeholder: ") (display (dump (budget-record-placeholder? budget-record)))
@@ -870,7 +878,8 @@
 
 
 
-    (budget-record-list-printer income-accounts debug-port)
+    (budget-record-list-printer income-accounts 1 debug-port)
+    (budget-record-list-printer expense-accounts 1 debug-port)
 
 
     (gnc:html-document-add-object!
