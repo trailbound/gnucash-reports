@@ -4,6 +4,7 @@
 (use-modules (gnucash main)) ;; FIXME: delete after we finish modularizing.
 (use-modules (ice-9 slib))
 (use-modules (gnucash gnc-module))
+(use-modules (gnucash report eguile-gnc))
 
 
 (gnc:module-load "gnucash/report/report-system" 0)
@@ -16,6 +17,32 @@
 ;;(gnc:module-load "gnucash/report/user-reports/budget-utils" 0)
 (use-modules (gnucash report user-reports budget-utils))
 
+
+(define (find-template fname)
+  ;; Find the eguile template file 'fname', and return its full path.
+  ;; First look in the user's .gnucash directory.
+  ;; Then look in Gnucash's standard report directory.
+  ;; This is complicated because of the need to cater for
+  ;; various operating systems; so it takes a fairly heuristic,
+  ;; 'best guess' approach.
+  ;; If no file is found, returns just 'fname' for use in error messages.
+  ;; Note: this has been tested on Linux and Windows Vista so far...
+  ;; Another note: this routine would be better in eguile-gnc.scm, but
+  ;; slib breaks eguile-gnc by turning off case-sensitivity when
+  ;; evaluating the template.
+  (let* ((userdir (sub-vicinity (user-vicinity) ".gnucash"))
+         (sysdir  (sub-vicinity (sub-vicinity (user-vicinity) "gnucash") "report"))
+         (home (or (home-vicinity)
+                   (getenv "USERPROFILE")
+                   (user-vicinity)
+                   "")))
+    ; make sure there's a trailing delimiter
+    (set! home (sub-vicinity (user-vicinity) home))
+    (let ((home-template (in-vicinity (in-vicinity home userdir) fname)))
+      (if (access? home-template R_OK)
+        home-template
+        (or (%search-load-path (in-vicinity sysdir fname))
+            fname)))))
 
 (define (escape-html s1)
   ;; convert string s1 to escape HTML special characters < > and &
@@ -124,6 +151,7 @@
                                             budget-total-cc
                                             diff-total-cc
                                             children
+
                                             balance-num ; excluding sublist
                                             depth
                                             treedepth
@@ -239,6 +267,12 @@
 
 (define reportname (N_ "Development Budget"))
 
+(define accounts-page    gnc:pagename-accounts)
+;;(define commodities-page (N_ "Commodities"))
+(define display-page     gnc:pagename-display)
+(define general-page     gnc:pagename-general)
+;;(define notes-page       (N_ "Notes"))
+
 ;; This function will generate a set of options that GnuCash
 ;; will use to display a dialog where the user can select
 ;; values for your report's parameters.
@@ -253,14 +287,14 @@
 
     (add-option
      (gnc:make-budget-option
-      (N_ "General")
+      general-page
       (N_ "Budget")
       "a"
       (N_ "Budget for report")))
 
     (add-option
      (gnc:make-date-option
-      (N_ "General")
+      general-page
       (N_ "Start Date")
       "ba"
       (N_ "Select which date to start generating the report from.")
@@ -278,7 +312,7 @@
 
     (add-option
      (gnc:make-number-range-option
-      (N_ "General") (N_ "Number of Report Periods")
+      general-page (N_ "Number of Report Periods")
       "bb" (N_ "Selects the number of periods to report from the start date.")
       12     ;; default
       0      ;; lower bound
@@ -289,21 +323,34 @@
 
     (add-option
      (gnc:make-simple-boolean-option
-      (N_ "General") (N_ "Generate Totals Column")
+      general-page (N_ "Generate Totals Column")
       "ca"
       (N_ "Selecting this adds a column at the end of the report that shows the individual account totals across the entire report time period.")
       #t))
 
     (add-option
      (gnc:make-simple-boolean-option
-      (N_ "General") (N_ "Generate YTD Totals Column")
+      general-page (N_ "Generate YTD Totals Column")
       "cb"
       (N_ "Selecting this adds a column at the end of the report that shows the Year-to-Date totals for each account.")
       #f))
 
+    (add-option
+     (gnc:make-string-option
+      display-page (N_ "Template file") "ce"
+      (N_ "The file name of the eguile template part of this report.  This file must be in your .gnucash directory, or else in its proper place within the GnuCash installation directories.")
+      "dev-budget.eguile.scm"))
+
+    (add-option
+     (gnc:make-string-option
+      display-page (N_ "CSS stylesheet file") "cf"
+      (N_ "The file name of the CSS stylesheet to use with this report.  If specified, this file should be in your .gnucash directory, or else in its proper place within the GnuCash installation directories.")
+      "dev-budget.css"))
+
+
 ;;    (add-option
 ;;     (gnc:make-date-option
-;;      (N_ "General")
+;;      general-page
 ;;      (N_ "Account Totals Date")
 ;;      "da"
 ;;      (N_ "Select which date to use in generating the account totals column.")
@@ -329,7 +376,7 @@
     ;; which will scale the values appropriately according the range.
     (add-option
      (gnc:make-color-option
-      (N_ "Color") (N_ "Background Color")
+      display-page (N_ "Background Color")
       "a" (N_ "This is a color option")
       (list #xff #xff #xff 0)
       255
@@ -337,7 +384,7 @@
 
     (add-option
      (gnc:make-color-option
-      (N_ "Color") (N_ "Text Color")
+      display-page (N_ "Text Color")
       "b" (N_ "This is a color option")
       (list #x00 #x00 #x00 0)
       255
@@ -345,7 +392,7 @@
 
     (add-option
      (gnc:make-color-option
-      (N_ "Color") (N_ "Column Color 1")
+      display-page (N_ "Column Color 1")
       "c" (N_ "Select the color for one of the columns")
       (list #xFF #xFF #xFF 0)
       255
@@ -353,7 +400,7 @@
 
     (add-option
      (gnc:make-color-option
-      (N_ "Color") (N_ "Column Color 2")
+      display-page (N_ "Column Color 2")
       "d" (N_ "Select the color for one of the columns")
       (list #xDD #xDD #xDD 0)
       255
@@ -361,7 +408,7 @@
 
     (add-option
      (gnc:make-color-option
-      (N_ "Color") (N_ "Row Color 1")
+      display-page (N_ "Row Color 1")
       "e" (N_ "Select the color for one of the rows")
       (list #xFF #xFF #xFF 0)
       255
@@ -369,17 +416,29 @@
 
     (add-option
      (gnc:make-color-option
-      (N_ "Color") (N_ "Row Color 2")
+      display-page (N_ "Row Color 2")
       "f" (N_ "Select the color for one of the rows")
       (list #xB3 #xDB #xFF 0)
       255
       #f))
 
+    (add-option
+     (gnc:make-string-option
+      display-page
+      (N_ "Font family") "g" (N_ "Font definition in CSS font-family format") "sans"))
+
+    (add-option
+     (gnc:make-string-option
+      display-page
+      (N_ "Font size") "h"
+      (N_ "Font size in CSS font-size format (e.g. \"medium\" or \"10pt\"") "medium"))
+
+
     ;; Selection for accounts we want to report on
     (add-option
      (gnc:make-account-list-option
       ;;Which tab it goes under
-      (N_ "Accounts")
+      accounts-page
       ;;Name on the box in the tab
       (N_ "Select Accounts")
       ;;What order it has with other items in this tab
@@ -393,7 +452,7 @@
       ;;Are multiple selections allowed
       #t))
 
-    (gnc:options-set-default-section options "General")
+    (gnc:options-set-default-section options general-page)
     options))
 
 
@@ -694,12 +753,19 @@
              (gnc:debug "DEVBGT: Actual list has value: " (cc-list-nonzero? (budget-record-actual-cc  new-record)))
              (gnc:debug "DEVBGT: Budget list has value: " (cc-list-nonzero? (budget-record-budget-cc  new-record)))
 
-;;             (if (and (not (cc-list-nonzero? (budget-record-budget-cc new-record)))
-;;                      (budget-record-placeholder? new-record))
-;;                 (budget-record-set-budget-cc! new-record
-;;                                               (sum-budget-list-for-budget-record-list (budget-record-children new-record))) )
+             (if (and (not (cc-list-nonzero? (budget-record-budget-cc new-record)))
+                      (budget-record-placeholder? new-record))
+                 (budget-record-set-budget-cc! new-record
+                                               (sum-budget-list-for-budget-record-list (budget-record-children new-record))) )
+
+
+;; why did I need children list?
 ;;             (set! children-list (budget-record-children new-record))
-             (set! sum-list (sum-budget-list-for-budget-record-list (budget-record-children new-record)))
+
+;;             This call worked.
+;;             (set! sum-list (sum-budget-list-for-budget-record-list (budget-record-children new-record)))
+
+;; I don't remember what this line was testing
 ;;             (set! sum-list (sum-cc-lists (budget-record-budget-cc new-record) (budget-record-actual-cc new-record)))
 
              (budget-record-set-diff-cc!      new-record (difference-cc-list account (budget-record-budget-cc new-record) (budget-record-actual-cc new-record) comm))
@@ -823,38 +889,46 @@
          (table (gnc:make-html-table))
          ;;(income-accounts '())
          ;;(expense-accounts '())
-         (budget (op-value "General" "Budget"))
-         (num-periods (op-value "General" "Number of Report Periods"))
-         (start-period (get-start-period budget (car (gnc:date-option-absolute-time (op-value "General" "Start Date")))))
+         (budget (op-value general-page "Budget"))
+         (num-periods (op-value general-page "Number of Report Periods"))
+         (start-period (get-start-period budget (car (gnc:date-option-absolute-time (op-value general-page "Start Date")))))
          (current-period (get-start-period budget (car (gnc:get-start-this-month))))
          ;;(debug-port (open-output-file "budget-debug.txt"))
          (debug-port (open-output-string))
          (income-accounts (build-account-record-list budget (assoc-ref (gnc:decompose-accountlist (gnc-account-get-children (gnc-get-current-root-account)))  ACCT-TYPE-INCOME) start-period num-periods))
          (expense-accounts (build-account-record-list budget (assoc-ref (gnc:decompose-accountlist (gnc-account-get-children (gnc-get-current-root-account)))  ACCT-TYPE-EXPENSE) start-period num-periods))
 
+         (opt-font-family      (get-op display-page     (N_ "Font family")))
+         (opt-font-size        (get-op display-page     (N_ "Font size")))
+         (opt-css-file         (get-op display-page     (N_ "CSS stylesheet file")))
 
-;;	 (acnt-list (budget-account-list budget
-;;                                   (gnc-account-get-descendants-sorted (gnc-get-current-root-account))
-;;                                   start-period
-;;                                   num-periods
-;;                                   (op-value "General" "Include accounts with only actual values.") ))
+         (css? (and (defined? 'gnc-html-engine-supports-css) (gnc-html-engine-supports-css)))
+         (html #f))
 
-         ) ;; end let*
-
-
-;; (diff-cc 'getmonetary comm #f))
-
-    ;; Debug values
-    ;;(gnc:debug "DEVBGT: Budget start period.. " start-period "   Account totals period.. " acnt-totals-period)
+    (set! html (eguile-file-to-string
+                (find-template "dev-budget.eguile.scm")
+                (the-environment)))
+    (gnc:debug "dev-budget.scm - generated html:") (gnc:debug html)
+    (gnc:html-document-add-object!
+     document
+     html)
 
 
 
-    ;;Setup the Title and font color and back ground color of the document
-    (gnc:html-document-set-title! document reportname)
-    (gnc:html-document-set-style! document "body"
-                                  'attribute (list "bgcolor" (gnc:color-option->html (get-op "Color" "Background Color")))
-                                  'font-color (gnc:color-option->html (get-op "Color" "Text Color")))
 
+
+;; Pre-eguile document
+;; -----------------------------------------------------------------------------
+
+         ;;Setup the Title and font color and back ground color of the document
+;;         (gnc:html-document-set-title! document reportname)
+;;         (gnc:html-document-set-style! document "body"
+;;                                       'attribute (list "bgcolor" (gnc:color-option->html (get-op "Color" "Background Color")))
+;;                                       'font-color (gnc:color-option->html (get-op "Color" "Text Color")))
+
+
+
+;; Saved for reference
 
 ;;    (gnc:html-document-add-object!
 ;;     document
@@ -877,25 +951,33 @@
 
 
 
+;; Main debug code
 
-    (budget-record-list-printer income-accounts 1 debug-port)
-    (budget-record-list-printer expense-accounts 1 debug-port)
+;;    (budget-record-list-printer income-accounts 1 debug-port)
+;;    (budget-record-list-printer expense-accounts 1 debug-port)
+;;
+;;
+;;    (gnc:html-document-add-object!
+;;     document
+;;     (gnc:make-html-text
+;;      (gnc:html-markup-p
+;;       (gnc:html-markup-b (_ "Record output:")))
+;;      (gnc:html-markup-tt
+;;       (get-output-string debug-port))
+;;        ;;(gnc:html-markup-b sumcol-period)))
+;;      ))
+;;    (close-output-port debug-port)
 
 
-    (gnc:html-document-add-object!
-     document
-     (gnc:make-html-text
-      (gnc:html-markup-p
-       (gnc:html-markup-b (_ "Record output:")))
-      (gnc:html-markup-tt
-       (get-output-string debug-port))
-        ;;(gnc:html-markup-b sumcol-period)))
-      ))
-    (close-output-port debug-port)
-;;    (record-accessor newbudget 'budgetrec-printer)
+
 
     ;;Add the generated table to the document
 ;;    (gnc:html-document-add-object! document table)
+
+
+;; -----------------------------------------------------------------------------
+;; End pre-eguile
+
 
     ;;Return the document
     document)
