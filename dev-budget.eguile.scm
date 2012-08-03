@@ -1,4 +1,5 @@
 <?scm
+(let* ((version 0.01))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; dev-budget.eguile.scm
@@ -27,8 +28,46 @@
 ;; Boston, MA  02110-1301,  USA       gnu@gnu.org
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; (display-values-row record
+;;                          (budget-record-budget-cc record)
+;;                          (budget-record-actual-cc record)
+;;                          (budget-record-diff-cc record))
+;; (gnc:gnc-monetary-amount (current-actual-cc 'getmonetary (budget-record-commodity record) #f))
 
-(let* ((version 0.01))
+
+
+  (define (display-values-row record budget-cc actual-cc diff-cc)
+    (let ( (current-budget-cc '())
+           (current-actual-cc '())
+           (current-diff-cc '()) )
+?>
+<td>Actual</td>
+<td>
+<?scm
+      (if (not (null? budget-cc))
+          (format-comm-coll (car budget-cc))
+          )
+?>
+
+</td>
+<?scm ))
+
+
+  (define (display-table-row record)
+    (let ()
+?>
+<tr valign="bottom">
+<td><?scm:d (budget-record-namelink record) ?>
+
+<?scm (if (budget-record? record)
+          (display-values-row record
+                    (budget-record-budget-cc record)
+                    (budget-record-actual-cc record)
+                    (budget-record-diff-cc record))) ?>
+<td>
+</tr>
+<?scm (map display-table-row (budget-record-children record)) ?>
+<?scm ))
 ?>
 
 <!-- The HTML starts here... -->
@@ -63,10 +102,10 @@
   <table border="0" cellpadding="16"><tr><td> <!-- hack for GTKHTML -->
 <?scm )) ?>
 <h2><?scm:d reportname ?></h2>
-
+<?scm (map display-table-row expense-accounts) ?>
 
 <?scm (if (not css?) (begin ?>
-  </table> <!-- hack for GTKHTML -->
+  </td></tr></table> <!-- hack for GTKHTML -->
 <?scm )) ?>
 
 </body>

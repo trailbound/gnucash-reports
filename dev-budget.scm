@@ -44,6 +44,7 @@
         (or (%search-load-path (in-vicinity sysdir fname))
             fname)))))
 
+
 (define (escape-html s1)
   ;; convert string s1 to escape HTML special characters < > and &
   ;; i.e. convert them to &lt; &gt; and &amp; respectively.
@@ -72,7 +73,6 @@
    (else (let ( (cc (car cc-list)) )
            (cons (gnc:gnc-monetary-amount (cc 'getmonetary comm #f)) (display-value-list (cdr cc-list) comm)))
          )))
-
 
 
 
@@ -265,13 +265,70 @@
 )
 
 
+
+;; Report options configuration
+;; -----------------------------------------------------------------------------
 (define reportname (N_ "Development Budget"))
+
+;; Pages
 
 (define accounts-page    gnc:pagename-accounts)
 ;;(define commodities-page (N_ "Commodities"))
 (define display-page     gnc:pagename-display)
 (define general-page     gnc:pagename-general)
 ;;(define notes-page       (N_ "Notes"))
+
+
+;; Option defines
+
+;;(define optname-budget
+;;(define opthelp-budget
+
+;; General page
+;;(define optname-report-title (N_ "Report Title"))
+;;(define opthelp-report-title (N_ "Title for this report"))
+(define optname-budget (N_ "Budget"))
+(define opthelp-budget (N_ "Budget to use for this report."))
+(define optname-start-date (N_ "Start Date"))
+(define opthelp-start-date (N_ "Select the date from which to start generating the report."))
+(define optname-number-report-periods (N_ "Number of Report Periods"))
+(define opthelp-number-report-periods (N_ "Selects the number of periods to report from the start date."))
+(define optname-generate-totals-column? (N_ "Generate Totals Column"))
+(define opthelp-generate-totals-column? (N_ "Selecting this adds a column at the end of the report that shows the individual account totals across the entire report time period."))
+(define optname-generate-ytd-column? (N_ "Generate YTD Totals Column"))
+(define opthelp-generate-ytd-column? (N_ "Selecting this adds a column at the end of the report that shows the Year-to-Date totals for each account."))
+(define optname-report-commodity (N_ "Report's currency"))
+
+(define optname-template-file  (N_ "Template file"))
+(define opthelp-template-file  (N_ "The file name of the eguile template part of this report.  This file must be in your .gnucash directory, or else in its proper place within the GnuCash installation directories."))
+(define optname-css-file  (N_ "CSS stylesheet file"))
+(define opthelp-css-file  (N_ "The file name of the CSS stylesheet to use with this report.  If specified, this file should be in your .gnucash directory, or else in its proper place within the GnuCash installation directories."))
+
+;; Display page
+(define optname-background-color (N_ "Background Color"))
+(define opthelp-background-color (N_ "The background color for this report."))
+(define optname-text-color (N_ "Text Color"))
+(define opthelp-text-color (N_ "The text color for this report."))
+(define optname-column-color-even (N_ "Even Column Color"))
+(define opthelp-column-color-even (N_ "Select the color for the even columns."))
+(define optname-column-color-odd (N_ "Odd Column Color"))
+(define opthelp-column-color-odd (N_ "Select the color for the even columns."))
+(define optname-row-color-even (N_ "Even Row Color"))
+(define opthelp-row-color-even (N_ "Select the color for the even rows."))
+(define optname-row-color-odd (N_ "Odd Row Color"))
+(define opthelp-row-color-odd (N_ "Select the color for the even rows."))
+(define optname-font-family    (N_ "Font family"))
+(define opthelp-font-family    (N_ "Font definition in CSS font-family format"))
+(define optname-font-size      (N_ "Font size"))
+(define opthelp-font-size      (N_ "Font size in CSS font-size format (e.g. \"medium\" or \"10pt\""))
+
+
+;; Acccounts page
+(define optname-select-accounts (N_ "Select Accounts"))
+(define opthelp-select-accounts (N_ "Select accounts on which you want to report"))
+
+
+
 
 ;; This function will generate a set of options that GnuCash
 ;; will use to display a dialog where the user can select
@@ -285,67 +342,58 @@
           (lambda (new-option)
             (gnc:register-option options new-option))))
 
-    (add-option
-     (gnc:make-budget-option
-      general-page
-      (N_ "Budget")
-      "a"
-      (N_ "Budget for report")))
 
-    (add-option
-     (gnc:make-date-option
-      general-page
-      (N_ "Start Date")
-      "ba"
-      (N_ "Select which date to start generating the report from.")
-      (lambda () (cons 'relative 'start-cal-year))
-      #f
-      'both
-      '( today
-         start-this-month
-         start-prev-month
-         start-current-quarter
-         start-prev-quarter
-         start-cal-year
-         start-prev-year
-         start-accounting-period)))
+    ;; General page
+    (add-option (gnc:make-budget-option
+                 general-page
+                 optname-budget "a" opthelp-budget))
 
-    (add-option
-     (gnc:make-number-range-option
-      general-page (N_ "Number of Report Periods")
-      "bb" (N_ "Selects the number of periods to report from the start date.")
-      12     ;; default
-      0      ;; lower bound
-      100000 ;; upper bound
-      0      ;; number of decimals
-      1      ;; step size
-      ))
+    (add-option (gnc:make-date-option
+                 general-page
+                 optname-start-date "ba" opthelp-start-date
+                 (lambda () (cons 'relative 'start-cal-year))
+                 #f
+                 'both
+                 '( today
+                    start-this-month
+                    start-prev-month
+                    start-current-quarter
+                    start-prev-quarter
+                    start-cal-year
+                    start-prev-year
+                    start-accounting-period)))
 
-    (add-option
-     (gnc:make-simple-boolean-option
-      general-page (N_ "Generate Totals Column")
-      "ca"
-      (N_ "Selecting this adds a column at the end of the report that shows the individual account totals across the entire report time period.")
-      #t))
+    (add-option (gnc:make-number-range-option
+                 general-page
+                 optname-number-report-periods "bb" opthelp-number-report-periods
+                 12     ;; default
+                 0      ;; lower bound
+                 100000 ;; upper bound
+                 0      ;; number of decimals
+                 1      ;; step size
+                 ))
 
-    (add-option
-     (gnc:make-simple-boolean-option
-      general-page (N_ "Generate YTD Totals Column")
-      "cb"
-      (N_ "Selecting this adds a column at the end of the report that shows the Year-to-Date totals for each account.")
-      #f))
+    (add-option (gnc:make-simple-boolean-option
+                 general-page
+                 optname-generate-totals-column? "ca" opthelp-generate-totals-column?
+                 #t))
 
-    (add-option
-     (gnc:make-string-option
-      display-page (N_ "Template file") "ce"
-      (N_ "The file name of the eguile template part of this report.  This file must be in your .gnucash directory, or else in its proper place within the GnuCash installation directories.")
-      "dev-budget.eguile.scm"))
+    (add-option (gnc:make-simple-boolean-option
+                 general-page
+                 optname-generate-ytd-column? "cb" opthelp-generate-ytd-column?
+                 #f))
 
-    (add-option
-     (gnc:make-string-option
-      display-page (N_ "CSS stylesheet file") "cf"
-      (N_ "The file name of the CSS stylesheet to use with this report.  If specified, this file should be in your .gnucash directory, or else in its proper place within the GnuCash installation directories.")
-      "dev-budget.css"))
+    (gnc:options-add-currency! options general-page optname-report-commodity "cc")
+
+    (add-option (gnc:make-string-option
+                 display-page
+                 optname-template-file "ce" opthelp-template-file
+                 "dev-budget.eguile.scm"))
+
+    (add-option (gnc:make-string-option
+                 display-page
+                 optname-css-file "cf" opthelp-css-file
+                 "dev-budget.css"))
 
 
 ;;    (add-option
@@ -367,6 +415,8 @@
 ;;         end-accounting-period)))
 
 
+    ;; Display page
+
     ;; This is a color option, defined by rgba values. A color value
     ;; is a list where the elements are the red, green, blue, and
     ;; alpha channel values respectively. The penultimate argument
@@ -374,86 +424,82 @@
     ;; (#f) indicates the alpha value should be ignored. You can get
     ;; a color string from a color option with gnc:color-option->html,
     ;; which will scale the values appropriately according the range.
-    (add-option
-     (gnc:make-color-option
-      display-page (N_ "Background Color")
-      "a" (N_ "This is a color option")
-      (list #xff #xff #xff 0)
-      255
-      #f))
+    (add-option (gnc:make-color-option
+                 display-page
+                 optname-background-color "a" opthelp-background-color
+                 (list #xff #xff #xff 0)
+                 255
+                 #f))
 
-    (add-option
-     (gnc:make-color-option
-      display-page (N_ "Text Color")
-      "b" (N_ "This is a color option")
-      (list #x00 #x00 #x00 0)
-      255
-      #f))
+    (add-option (gnc:make-color-option
+                 display-page
+                 optname-text-color "b" opthelp-text-color
+                 (list #x00 #x00 #x00 0)
+                 255
+                 #f))
 
-    (add-option
-     (gnc:make-color-option
-      display-page (N_ "Column Color 1")
-      "c" (N_ "Select the color for one of the columns")
-      (list #xFF #xFF #xFF 0)
-      255
-      #f))
+    (add-option (gnc:make-color-option
+                 display-page
+                 optname-column-color-even "c" opthelp-column-color-even
+                 (list #xFF #xFF #xFF 0)
+                 255
+                 #f))
 
-    (add-option
-     (gnc:make-color-option
-      display-page (N_ "Column Color 2")
-      "d" (N_ "Select the color for one of the columns")
-      (list #xDD #xDD #xDD 0)
-      255
-      #f))
+    (add-option (gnc:make-color-option
+                 display-page
+                 optname-column-color-odd "d" opthelp-column-color-odd
+                 (list #xDD #xDD #xDD 0)
+                 255
+                 #f))
 
-    (add-option
-     (gnc:make-color-option
-      display-page (N_ "Row Color 1")
-      "e" (N_ "Select the color for one of the rows")
-      (list #xFF #xFF #xFF 0)
-      255
-      #f))
+    (add-option (gnc:make-color-option
+                 display-page
+                 optname-row-color-even "e" opthelp-row-color-even
+                 (list #xFF #xFF #xFF 0)
+                 255
+                 #f))
 
-    (add-option
-     (gnc:make-color-option
-      display-page (N_ "Row Color 2")
-      "f" (N_ "Select the color for one of the rows")
-      (list #xB3 #xDB #xFF 0)
-      255
-      #f))
+    (add-option (gnc:make-color-option
+                 display-page
+                 optname-row-color-odd "f" opthelp-row-color-odd
+                 (list #xB3 #xDB #xFF 0)
+                 255
+                 #f))
 
-    (add-option
-     (gnc:make-string-option
-      display-page
-      (N_ "Font family") "g" (N_ "Font definition in CSS font-family format") "sans"))
+    (add-option (gnc:make-string-option
+                 display-page
+                 optname-font-family "g" opthelp-font-family
+                 "sans"))
 
-    (add-option
-     (gnc:make-string-option
-      display-page
-      (N_ "Font size") "h"
-      (N_ "Font size in CSS font-size format (e.g. \"medium\" or \"10pt\"") "medium"))
+    (add-option (gnc:make-string-option
+                 display-page
+                 optname-font-size "h" opthelp-font-size
+                 "medium"))
 
 
+    ;; Accounts page
     ;; Selection for accounts we want to report on
-    (add-option
-     (gnc:make-account-list-option
-      ;;Which tab it goes under
-      accounts-page
-      ;;Name on the box in the tab
-      (N_ "Select Accounts")
-      ;;What order it has with other items in this tab
-      "a"
-      ;;What appears when hovered over by the mouse
-      (N_ "Select accounts on which you want to report")
-      ;;Default selection algorithm
-      (lambda () '())
-      ;;Which accounts to select
-      #f
-      ;;Are multiple selections allowed
-      #t))
+    (add-option (gnc:make-account-list-option
+                 accounts-page
+                 optname-select-accounts "a" opthelp-select-accounts
 
+                 ;;Default selection algorithm
+                 (lambda () '())
+                 ;;Which accounts to select
+                 #f
+                 ;;Are multiple selections allowed
+                 #t))
+
+
+    ;; Default page when options are opened.
     (gnc:options-set-default-section options general-page)
     options))
+;; -----------------------------------------------------------------------------
+;; End options
+
+
+
+
 
 
 ;; This is the rendering function. It accepts a database of options
@@ -465,11 +511,11 @@
 (define (dev-detailed-budget-renderer report-obj)
 
   ;; These are some helper functions for looking up option values.
-  (define (get-op section name)
+  (define (get-option section name)
     (gnc:lookup-option (gnc:report-options report-obj) section name))
 
-  (define (op-value section name)
-    (gnc:option-value (get-op section name)))
+  (define (get-option-value section name)
+    (gnc:option-value (get-option section name)))
 
 
 
@@ -889,21 +935,81 @@
          (table (gnc:make-html-table))
          ;;(income-accounts '())
          ;;(expense-accounts '())
-         (budget (op-value general-page "Budget"))
-         (num-periods (op-value general-page "Number of Report Periods"))
-         (start-period (get-start-period budget (car (gnc:date-option-absolute-time (op-value general-page "Start Date")))))
+         (budget (get-option-value general-page "Budget"))
+         (num-periods (get-option-value general-page "Number of Report Periods"))
+         (start-period (get-start-period budget (car (gnc:date-option-absolute-time (get-option-value general-page "Start Date")))))
          (current-period (get-start-period budget (car (gnc:get-start-this-month))))
          ;;(debug-port (open-output-file "budget-debug.txt"))
          (debug-port (open-output-string))
          (income-accounts (build-account-record-list budget (assoc-ref (gnc:decompose-accountlist (gnc-account-get-children (gnc-get-current-root-account)))  ACCT-TYPE-INCOME) start-period num-periods))
          (expense-accounts (build-account-record-list budget (assoc-ref (gnc:decompose-accountlist (gnc-account-get-children (gnc-get-current-root-account)))  ACCT-TYPE-EXPENSE) start-period num-periods))
+         (opt-report-commodity (get-option-value general-page     optname-report-commodity))
 
-         (opt-font-family      (get-op display-page     (N_ "Font family")))
-         (opt-font-size        (get-op display-page     (N_ "Font size")))
-         (opt-css-file         (get-op display-page     (N_ "CSS stylesheet file")))
+         (opt-font-family      (get-option-value display-page     optname-font-family))
+         (opt-font-size        (get-option-value display-page     optname-font-size))
+         (opt-css-file         (get-option-value display-page     (N_ "CSS stylesheet file")))
 
          (css? (and (defined? 'gnc-html-engine-supports-css) (gnc-html-engine-supports-css)))
          (html #f))
+
+    ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+    ;;; gnc-specific routines
+    ;;; (if these are already defined elsewhere, I couldn't find them
+    ;;;  -- please let me know.  CD)
+
+    (define (gnc-monetary-neg? monetary)
+      ; return true if the monetary value is negative
+      (gnc-numeric-negative-p (gnc:gnc-monetary-amount monetary)))
+
+    (define (neg-format mny-string neg?)
+      ;; Given a monetary string, e.g. £123.00, applying formatting
+      ;; for sign depending on option
+      ;; And applies the CSS style for negatives too.  Is that right?
+      (if neg?
+        (if (equal? opt-neg-format 'negbrackets)
+          (negstyle (nbsp (string-append "(" mny-string ")")))
+          (negstyle (nbsp mny-string)))
+        (nbsp mny-string)))
+
+    (define (format-monetary mny)
+      ;; Format the given gnc:monetary value according to opt-neg-format
+      ;; If mny's currency isn't the same as that of the report,
+      ;; convert it -- show both values if specified by option
+      (let ((neg? (gnc-monetary-neg? mny))
+            (comm (gnc:gnc-monetary-commodity mny))
+            (answer ""))
+        (if (and neg? (equal? opt-neg-format 'negbrackets))
+          ; strip sign from amount -- (neg-format) will replace with brackets
+          (set! mny (gnc:monetary-neg mny)))
+        (if (not (gnc-commodity-equiv comm opt-report-commodity))
+          (begin
+            (if opt-show-foreign?
+              (set! answer (string-append (foreignstyle (neg-format (gnc:monetary->string mny) neg?)) "&nbsp;")))
+            (set! mny (exchange-fn mny opt-report-commodity))))
+        ; main currency - converted if necessary
+        (set! answer (string-append answer (neg-format (gnc:monetary->string mny) neg?)))
+        answer))
+
+    (define (format-comm-coll cc)
+      ;; Format a commodity collector for display in the report.
+      ;; Returns one commodity per line.
+      (string-concatenate
+        (map-in-order
+          (lambda (mny)
+            (string-append (format-monetary mny) "<br>"))
+          (cc 'format gnc:make-gnc-monetary #f))))
+
+    (define (format-comm-coll-total cc)
+      ;; Format the total value of a commodity collector
+      (format-monetary (gnc:sum-collector-commodity cc opt-report-commodity exchange-fn)))
+
+    (define (fmtmoney2 mny)
+      ;; format a monetary amount in the given currency/commodity
+      ;; !! this takes a gnc-monetary
+      (nbsp (gnc:monetary->string mny)))
+
+    ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 
     (set! html (eguile-file-to-string
                 (find-template "dev-budget.eguile.scm")
@@ -939,7 +1045,7 @@
 ;;        (gnc:date-to-month-fraction end-date)
 ;;        ;;(gnc:html-markup-b sumcol-period)))
 ;;      ))
-    ;;(gnc:debug "Sum column period.. " (gnc:date-get-month-year-string (localtime (car (gnc:date-option-absolute-time (op-value "General" "Account Totals Date"))))))
+    ;;(gnc:debug "Sum column period.. " (gnc:date-get-month-year-string (localtime (car (gnc:date-option-absolute-time (get-option-value "General" "Account Totals Date"))))))
     ;;(gnc:debug "End period.. " (gnc:date-get-month-year-string (gnc:timepair->date (gnc-timespec2timepair (gnc-budget-get-period-end-date budget 0)))))
 ;;    (budget-record-printer brec debug-port)
 ;;    (gnc:debug "String port" (get-output-string debug-port))
